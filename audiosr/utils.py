@@ -313,6 +313,7 @@ def save_wave(waveform, inputpath, savepath, name="outwav", samplerate=16000):
         print("Save audio to %s." % save_path)
         sf.write(temp_path, waveform[i, 0], samplerate=samplerate)
         strip_silence(inputpath, temp_path, save_path)
+        return save_path
 
 
 def exists(x):
