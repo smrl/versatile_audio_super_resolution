@@ -90,7 +90,8 @@ def make_batch_for_super_resolution(input_file, waveform=None, fbank=None):
         "sampling_rate": 48000,
     }
 
-    # print(batch["waveform"].size(), batch["stft"].size(), batch["log_mel_spec"].size())
+    print(f"waveform:{batch['waveform'].size()} stft: {batch['stft'].size()} log_mel_spec: {batch['log_mel_spec'].size()}")
+    
 
     batch.update(lowpass_filtering_prepare_inference(batch))
 
