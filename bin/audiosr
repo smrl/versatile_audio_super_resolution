@@ -144,7 +144,7 @@ def generate_batch(files_todo, directory):
             latent_t_per_second=latent_t_per_second
         )
 
-        temp_path = save_wave(waveform, input_path=input_file, savepath=output_dir, name=name, samplerate=sample_rate)
+        temp_path = save_wave(waveform, inputpath=input_file, savepath=output_dir, name=name, samplerate=sample_rate)
         original_file = AudioTagger(input_file)
         output_file = AudioTagger(temp_path)     
 
