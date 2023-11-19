@@ -4,6 +4,8 @@ import torch
 import logging
 from audiosr import super_resolution, build_model, save_wave, get_time, read_list
 import argparse
+from audiotagger import AudioTagger
+import json
 
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 matplotlib_logger = logging.getLogger('matplotlib')
@@ -29,11 +31,27 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "-p",
+    "--path",
+    type=str,
+    required=False,
+    default="",
+    help="A path that contains all audio files that need to perform audio super resolution",
+)
+
+parser.add_argument(
+    "-r",
+    "--recursive",
+    action="store_true",
+    help="Convert input path recursively",
+)
+
+parser.add_argument(
     "-s",
     "--save_path",
     type=str,
     required=False,
-    help="The path to save model output",
+    help="The path to save model output, if path is specified then <path>/upsampled will be used",
     default="./output",
 )
 
@@ -85,14 +103,14 @@ parser.add_argument(
     type=str,
     required=False,
     help="Suffix for the output file",
-    default="_AudioSR_Processed_48K",
+    default="_TA_sr",
 )
 
 args = parser.parse_args()
 torch.set_float32_matmul_precision("high")
 save_path = os.path.join(args.save_path, get_time())
 
-assert args.input_file_list is not None or args.input_audio_file is not None,"Please provide either a list of audio files or a single audio file"
+assert args.input_file_list is not None or args.input_audio_file is not None or args.path is not None,"Please provide either a list of audio files or a single audio file"
 
 input_file = args.input_audio_file
 random_seed = args.seed
@@ -109,15 +127,68 @@ if(args.input_file_list):
 else: 
     files_todo = [input_file]
     
-for input_file in files_todo:
-    name = os.path.splitext(os.path.basename(input_file))[0] + args.suffix
+def generate_batch(files_todo, directory):
+    output_dir = os.path.join(directory, f"upsampled_S{args.ddim_steps}_G{args.guidance_scale}")
+    if not os.path.exists(output_dir):
+        os.mkdir(output_dir)
 
-    waveform = super_resolution(
-        audiosr,
-        input_file,
-        seed=random_seed,
-        guidance_scale=guidance_scale,
-        ddim_steps=args.ddim_steps,
-        latent_t_per_second=latent_t_per_second
-    )
-    save_wave(waveform, inputpath=input_file, savepath=save_path, name=name, samplerate=sample_rate)
+    for input_file in files_todo:
+        name = os.path.splitext(os.path.basename(input_file))[0] + args.suffix
+
+        waveform = super_resolution(
+            audiosr,
+            input_file,
+            seed=random_seed,
+            guidance_scale=guidance_scale,
+            ddim_steps=args.ddim_steps,
+            latent_t_per_second=latent_t_per_second
+        )
+
+        temp_path = save_wave(waveform, output_dir, name=name, samplerate=sample_rate)
+        original_file = AudioTagger(input_file)
+        output_file = AudioTagger(temp_path)     
+
+        original_tags = original_file.get_tags()
+        if "INHERITED" in output_file.tags:
+            inherited_tags = json.loads(output_file.tags["INHERITED"][0])
+            inherited_tags.append(original_tags)
+        else:
+            inherited_tags = original_tags
+        
+        output_file.add_tag("INHERITED", json.dumps(inherited_tags))
+
+        output_file.add_tag("ORIGINATOR", "Tech Audio")
+        output_file.tags["PROCEDURE"] = ["AudioSR super-resolution"]
+        output_file.add_tag("SEED", random_seed)
+        output_file.add_tag("STEPS", args.ddim_steps)
+        output_file.add_tag("GUIDANCE", guidance_scale)
+        output_file.add_tag("MODEL", args.model_name)
+        output_file.write_tags()
+
+if(args.input_file_list):
+    print("Generate audio based on the text prompts in %s" % args.input_file_list)
+    wav_files = read_list(args.input_file_list)
+    generate_batch(wav_files, "./") # will create output dir in current dir
+
+elif(args.path):
+    path = args.path
+    print(f"Generate audio based on the audio files found in {path}")
+
+    if args.recursive:
+        print("Recursive mode enabled")
+        for root, dirs, files in os.walk(path):
+            dirs[:] = [d for d in dirs if "upsampled" not in d]
+            wav_files = [os.path.join(root, file) for file in files if file.endswith((".wav", ".WAV"))]
+            if wav_files:
+                generate_batch(wav_files, root)
+    else:
+        print("No recursion -- Will not descend into subdirectories.")
+        wav_files = [os.path.join(path, file) for file in os.listdir(path) if file.endswith(('.wav', '.WAV'))]
+        if wav_files:
+            generate_batch(wav_files, path)
+
+else:
+    wav_files = [input_file]
+    absolute_path = os.path.abspath(input_file)
+    output_dir = os.path.dirname(absolute_path)
+    generate_batch(wav_files, output_dir)
